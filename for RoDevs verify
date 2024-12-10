@@ -1,349 +1,281 @@
-local Players = game:GetService("Players")
-local replicatedStorage = game:GetService("ReplicatedStorage")
+local runService = game:GetService("RunService")
 
-local events = replicatedStorage:WaitForChild("Events")
-local animateTowerEvent = events:WaitForChild("AnimateTower")
-local effectEvent = events:WaitForChild("EffectEvent")
-local functions = replicatedStorage:WaitForChild("Functions")
-local spawnTowerFunction = functions:WaitForChild("SpawnTower")
-local requestTowerFunction = functions:WaitForChild("RequestTower")
-local sellTowerFunction = functions:WaitForChild("SellTower")
-local changeModeFunction = functions:WaitForChild("ChangeTowerMode")
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:wait()
+local humanoid = character:WaitForChild("Humanoid")
 
+local car
 
-local maxTower = 25
-local tower = {}
-
-local function FindNearestTarget(newTower, range)
-	local nearestTarget = nil
-
-	for i, target in ipairs(workspace.Mob:GetChildren()) do
-		local distance = (target.HumanoidRootPart.position - newTower.HumanoidRootPart.Position).Magnitude
-		if distance < range then
-			nearestTarget = target
-			range = distance
-		end
-	end
-
-	return nearestTarget
-end
-
-function tower.FindTarget(newTower, range, mode)
-	local bestTarget = nil
+function newCharacter()
+	character = player.Character
+	humanoid = character:WaitForChild("Humanoid")
 	
-	local bestWaypoint = nil
-	local bestDistance = nil
-	local bestHealth = nil
-	local map = workspace.Map:FindFirstChildOfClass("Folder")
-	
-	for i, mob in ipairs(workspace.Mob:GetChildren()) do
-		local distanceToMob = (mob.HumanoidRootPart.Position - newTower.HumanoidRootPart.Position).Magnitude
-		local distancetoWaypoint = (mob.HumanoidRootPart.Position - map.Waypoints[mob.MovingTo.Value].Position).Magnitude
-		
-		
-		
-		if newTower:GetAttribute("NoAttack") then continue end
-		
-		if distanceToMob <= range then
-			if mode == "Near" then
-				
-				range = distanceToMob
-				bestTarget = mob
-			elseif mode == "First" then
-				if not bestWaypoint or mob.MovingTo.Value >= bestWaypoint then
-					if bestWaypoint then
-						bestDistance = nil
-					end
-					bestWaypoint = mob.MovingTo.Value
-					
-					if not bestDistance or distancetoWaypoint < bestDistance then
-						bestDistance = distancetoWaypoint
-						bestTarget = mob
-					end
-			    end
-			elseif mode == "Last" then
-				if not bestWaypoint or mob.MovingTo.Value <= bestWaypoint then
-					bestWaypoint = mob.MovingTo.Value
-
-					if not bestDistance or distancetoWaypoint > bestDistance then
-						bestDistance = distancetoWaypoint
-						bestTarget = mob
-					end
-				end
-			elseif mode == "Strong" then
-				if not bestHealth or mob.Humanoid.Health > bestHealth then
-					bestHealth = mob.Humanoid.Health
-					bestTarget = mob
-				end
-			elseif mode == "Weak" then
-				if not bestHealth or mob.Humanoid.Health < bestHealth then
-					bestHealth = mob.Humanoid.Health
-					bestTarget = mob
-				end
-			end
-		end
-	end
-	
-	return bestTarget
-end
-
-function tower.farm(newTower, player)
-	local config = newTower:FindFirstChild("Config")
-	
-	local attachment = newTower.HumanoidRootPart:FindFirstChild("FarmAttachment")
-	local billboard = attachment:FindFirstChild("CashGUI")
-	
-	if billboard then
-		billboard.CashLabel.Text = "+$" .. config.Cash.Value
-	end
-	
-	workspace.Info.Wave.Changed:Connect(function()
-		if newTower then
-			local gold = player.leaderstats:FindFirstChild("Gold")
-			local targetGold = gold.Value + config.Cash.Value
-			while gold.Value < targetGold do
-				gold.Value += 10
-				task.wait(0.001) -- добавляем задержку между каждым добавлением золота
-			end
-			if billboard then
-				local Tween = game.TweenService:Create(billboard.CashLabel, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),{Position = UDim2.new(0, 0, -0.25, 0)})
-
-				attachment.CashSound:Play()
-				attachment.Particle.Enabled = true
-				billboard.CashLabel.Visible = true
-				Tween:Play()
-				task.wait(3)
-				attachment.CashSound:Play()
-				attachment.Particle.Enabled = false
-				billboard.CashLabel.Visible = false
-				billboard.CashLabel.Position = UDim2.new(0, 0, 0, 0)
-			end
+	humanoid.StateChanged:connect(function(old, new)
+		if car and not (new == Enum.HumanoidStateType.Seated) then
+			steerWheels(0)
+			powerWheels(0)
+			stopSounds()
+			car = nil
+		elseif not car and new == Enum.HumanoidStateType.Seated and humanoid.SeatPart and humanoid.SeatPart.Name == "DriveSeat" then
+			car = humanoid.SeatPart.Parent
+			runSounds()
 		end
 	end)
 end
+newCharacter()
+player.CharacterAdded:connect(newCharacter)
 
-function tower.Poison(newTower, target, duration)
-	if not target then return end
+--------------------------------[[ Runnung ]]------------------------------------
+
+local lastSteer
+function steerWheels(direction)
+	if not car or not car.Parent or not car:FindFirstChild("SteerMotors") then return end
+	lastSteer = tick()
+	local thisSteer = lastSteer
 	
-	local statusEffect = target:FindFirstChild("StatusEffects")
-	local targetHum = target:WaitForChild("Humanoid")
-	local isPoisoned = statusEffect:FindFirstChild("IsPoisoned")
-	local poisonTime = statusEffect:FindFirstChild("PoisonTime")
-	
-	if not targetHum or not target then return end
-	if statusEffect and poisonTime and duration >= poisonTime.Value then
-		poisonTime.Value = duration
+	for _, folder in pairs(car.SteerMotors:GetChildren()) do
+		local motor = folder.Motor.Value
+		if motor then
+			coroutine.resume(coroutine.create(function()	
+				
+				motor.DesiredAngle = car.Configuration.SteerAngle.Value * folder.DirectionFactor.Value * direction
+				
+				motor.MaxVelocity = 6 * car.Configuration.SteerVelocity.Value
+				while car and (motor.DesiredAngle < 0 and motor.CurrentAngle > 0 or motor.DesiredAngle > 0 and motor.CurrentAngle < 0 
+					and thisSteer == lastSteer and not (direction == 0)) do
+					runService.RenderStepped:wait()
+				end
+				if thisSteer == lastSteer and car then
+					motor.MaxVelocity = (direction == 0 and 2 or 1) * car.Configuration.SteerVelocity.Value
+				end
+				
+			end))
+		end
 	end
 end
 
-function tower.Attack(newTower, player)
-	local config = newTower.Config
-	local target = tower.FindTarget(newTower, config.Range.Value, config.TargetMode.Value)
-	local tweenService = game:GetService("TweenService")
-
-	local function splash(targeted, obj)
-		effectEvent:FireAllClients(targeted, obj)
-		targeted.Humanoid:TakeDamage(obj.Config:WaitForChild("Damage").Value)
-		local radius = obj.Config.SplashRange.Value
-		local mobs = workspace.Mob:GetChildren()
-
-		local targets = {}
-		for i, target in pairs(mobs) do
-			local distance = (targeted:WaitForChild("HumanoidRootPart").Position - target:WaitForChild("HumanoidRootPart").Position).Magnitude
-			if distance <= radius and target ~= targeted then
-				table.insert(targets, target)
-				target.Humanoid:TakeDamage(obj.Config:WaitForChild("Damage").Value)
-			end
+function powerWheels(power)
+	if not car or not car.Parent or not car:FindFirstChild("PowerWheels") then return end
+	for _, folder in pairs(car.PowerWheels:GetChildren()) do
+		local wheel = folder.Wheel.Value
+		if wheel then
+			wheel.BottomParamB = car.Configuration.MaxSpeed.Value * folder.DirectionFactor.Value * power
 		end
-	end
-
-	if target then
-		local targetPosition = target.HumanoidRootPart.Position
-		local towerPosition = newTower.HumanoidRootPart.Position
-		local toTarget = targetPosition - towerPosition
-		local newY = math.atan2(toTarget.X, toTarget.Z) - math.pi
-		local tweenInfo = TweenInfo.new(0.1)
-		local tween = tweenService:Create(newTower.HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(towerPosition.X, towerPosition.Y, towerPosition.Z) * CFrame.Angles(0, newY, 0)})
-		tween:Play()
-
-		animateTowerEvent:FireAllClients(newTower, "Attack", target)
-		if newTower.Config:FindFirstChild("PoisonTime") then
-			tower.Poison(newTower, target, config.PoisonTime.Value)
-		end
-		if newTower.Config:FindFirstChild("SplashRange") then
-			splash(target, newTower)
-		else
-			target.Humanoid:TakeDamage(config.Damage.Value)
-		end
-
-		if target.Humanoid.Health <= 0 then
-			local targetPrice = target.Price.Value
-			for i = 1, targetPrice do
-				player.leaderstats.Gold.Value += 1
-				task.wait(0.01) -- добавляем задержку между каждым добавлением золота
-			end
-			player.Kills.Value += 1
-		end
-
-
-		task.wait(config.Cooldown.Value)
-	end
-
-	task.wait(0.1)
-
-	if newTower and newTower.Parent then
-		tower.Attack(newTower, player)
 	end
 end
 
 
-game.ReplicatedStorage.Events.BuffTower.OnServerEvent:Connect(function(player, obj)
-	local conf = obj:FindFirstChild("Config")
-	if conf then
-		conf.Cooldown.Value = conf.Cooldown.Value / 3
-		wait(5)
-		conf.Cooldown.Value = conf.Cooldown.Value * 3
+
+local throttle=0
+local steer=0
+
+
+
+function steerChanged()
+	steerWheels(steer)
+end
+
+
+local lastThrottleChange=0
+local currentPowerOutput = 0
+
+function throttleChanged()
+	local thisThrottleChange=tick()
+	lastThrottleChange=thisThrottleChange
+	
+	local diffSign = (throttle - currentPowerOutput) / math.abs(throttle - currentPowerOutput) 
+	
+	local startThrottle = 0.3 * diffSign
+	if math.abs(throttle) < 0.05 then
+		startThrottle = 0
+		throttle = 0
+	elseif math.abs(throttle) < 0.4 then
+		startThrottle = 0
+	end
+	
+
+	for i = startThrottle, throttle, 0.008 * diffSign do	
+		powerWheels(i)
+		currentPowerOutput = i
+	
+		runService.RenderStepped:wait()
+		
+		if not(thisThrottleChange==lastThrottleChange) or not car then
+			break
+		end
+	end
+end
+
+function runSounds()
+	if car:FindFirstChild("RunSounds") then
+		car.RunSounds:FireServer("Startup")
+		wait(1)
+		local currentPitch = car and (1 - car.Configuration.SoundPitchRange.MinValue) / (car.Configuration.SoundPitchRange.MaxValue - car.Configuration.SoundPitchRange.MinValue)
+		while car do
+			currentPitch = currentPitch + (math.abs(currentPowerOutput) - currentPitch) * 0.1
+			car.RunSounds:FireServer("Set Pitch", currentPitch)
+			wait()
+		end
+	end
+end
+
+function stopSounds()
+	if car:FindFirstChild("RunSounds") then
+		car.RunSounds:FireServer("Cut")
+	end
+end
+
+--------------------------------[[ Bed network ownership ]]------------------------------------
+local interactPermission = require(game.ReplicatedStorage.Interaction.InteractionPermission)
+
+
+function setVehicleOwnership(seat, partList, networkOwnershipRequestList)	
+	if not seat or partList and partList[seat] or seat.Parent:FindFirstChild("OwnershipOverride") then
+		return
+	end
+	
+	local thisIsFirstCall = networkOwnershipRequestList == nil
+	networkOwnershipRequestList = networkOwnershipRequestList or {}
+	
+	partList = partList or {}
+	partList[seat] = true
+	
+	--game.ReplicatedStorage.Interaction.ClientRequestOwnership:FireServer(seat)
+	table.insert(networkOwnershipRequestList, seat)
+	for _, wheel in pairs(getWheels(seat.Parent)) do
+		--game.ReplicatedStorage.Interaction.ClientRequestOwnership:FireServer(wheel)
+
+		table.insert(networkOwnershipRequestList, wheel)
+	end
+	
+	local gottenBeds = {}
+	local gottenParts = {}
+	
+	for _, part in pairs(seat:GetConnectedParts(true)) do
+		
+		if part.Parent then
+			if part:FindFirstChild("HitchedTrailer") then
+				if part.HitchedTrailer.Value and part.HitchedTrailer.Value.PrimaryPart then
+					setVehicleOwnership(part.HitchedTrailer.Value.PrimaryPart, partList, networkOwnershipRequestList)
+				else
+					part.HitchedTrailer:Destroy()
+				end
+				for _, v in pairs(part:GetChildren()) do
+					if v.Name == "HitchConnectionInstance" then
+						if v.Value and v.Value.Parent then
+							--game.ReplicatedStorage.Interaction.ClientRequestOwnership:FireServer(v.Value)
+							table.insert(networkOwnershipRequestList, v.Value)
+						else
+							v:Destroy()
+						end
+					end
+				end
+			end
+		
+			for _, bed in pairs(part.Parent:GetChildren()) do			
+				
+				if bed.Name == "BedInfo" and not gottenBeds[bed] then		
+					gottenBeds[bed] = true
+	
+					local centerPos = (seat.Parent.Main.CFrame * bed.CFrame.Value).p				
+					local size = bed.Size.Value.magnitude * Vector3.new(1, 1, 1) * 0.6
+					local regionCount = 2
+					
+					for x = 0, regionCount - 1 do
+						for y = 0, regionCount - 1 do
+							for z = 0, regionCount - 1 do
+							
+								local pos = centerPos - size
+								local size = size / regionCount
+								pos = pos + size * 2 * Vector3.new(x, y, z) + size
+								
+								local region = Region3.new(pos - size, pos + size)
+								
+								if game.ReplicatedStorage.OwnershipDebug.Value then
+									game.ReplicatedStorage.OwnershipDebug.BedRegionDebug:FireServer(pos, size)
+								end
+							
+								for _, v in pairs(workspace:FindPartsInRegion3(region, seat.Parent, 100)) do
+									if not gottenParts[v] then
+										gottenParts[v] = true
+										
+										local p = findHighestParent(v)
+										if not v.Anchored and p and not p.Parent:IsA("Tool") and not (v.Name == "HitchButton") and interactPermission:UserCanInteract(player, p.Parent) then
+											if not p.Parent:FindFirstChild("CarRequire") and not p.Parent:FindFirstChild("TrailerRequire") then
+											--game.ReplicatedStorage.Interaction.ClientRequestOwnership:FireServer(v)
+												table.insert(networkOwnershipRequestList, v)
+											end
+										end
+									end
+								end
+								
+							end
+						end
+					end
+			
+				end
+			end
+		end
+	end
+
+	if thisIsFirstCall then
+		game.ReplicatedStorage.Interaction.ClientRequestOwnershipList:FireServer(networkOwnershipRequestList)
+	end
+end
+
+script.SetVehicleOwnership.Event:connect(setVehicleOwnership)
+
+
+function getWheels(parent, list)
+	list = list or {}
+	for _, v in pairs(parent:GetChildren()) do
+		if v.Name == "Wheel" and v:IsA("BasePart") then
+			table.insert(list, v)
+		end
+		getWheels(v, list)
+	end
+	return list
+end
+
+
+function findHighestParent(child)
+	if not child or not child.Parent then
+		return nil
+	end
+	if child.Parent:FindFirstChild("Owner") then
+		return child
+	elseif child.Parent == workspace or not child.Parent then
+		return nil
+	else
+		return findHighestParent(child.Parent)
+	end
+end
+
+--------------------------------[[ User Input ]]------------------------------------
+
+wait(1)
+
+local input = require(script.Parent.UserInput)
+
+input.SteerChange(function(v)
+	if car then
+		steer = v
+		steerChanged()
 	end
 end)
 
-function tower.ChangeMode(player, model)
-	if model and model:FindFirstChild("Config") then
-		local targetMode = model.Config.TargetMode
-		local modes = {"First", "Last", "Near", "Strong", "Weak"}
-		local modeIndex = table.find(modes, targetMode.Value)
-		
-		if modeIndex < #modes then
-			targetMode.Value = modes[modeIndex + 1]
-		else
-			targetMode.Value = modes[1]
-		end
-		
-		return true
-	else
-		warn("Unable to change tower mode")
-		return false
+input.ThrottleChange(function(v)
+	if car then
+		throttle = v
+		throttleChanged()
 	end
-end
-changeModeFunction.OnServerInvoke = tower.ChangeMode
+end)
 
-function tower.Sell(player, model)
-	if model and model:FindFirstChild("Config") then
-		player.PlacedTowers:FindFirstChild(model.Name .. "s").Value -= 1
-		player.PlacedTowers:FindFirstChild("TotalTowers").Value -= 1
-		player.leaderstats.Gold.Value += model.Config.Price.Value / 1.5
-		model:Destroy()
-		return true
-	else
-		warn("Unable to sell this tower")
-		return false
-	end
-end
-sellTowerFunction.OnServerInvoke = tower.Sell
-
-function tower.spawn(player, name, cframe, previous, Lvl, check)
-	local allowedToSpawn = tower.CheckSpawn(player, name, Lvl, previous, check)
-	
-	
-	if allowedToSpawn then
-		
-		local newTower 
-		local oldMode = nil
-		local upr = nil
-		if previous then
-			oldMode = previous.Config.TargetMode.Value
-			upr = previous.Config.Lvl.Value + 1
-			previous:Destroy()
-			newTower = replicatedStorage.Towers["Upgrades_" .. upr][name]:Clone()
-		else
-			newTower = replicatedStorage.Towers[name]:Clone()
-			player.PlacedTowers:FindFirstChild(name .. "s").Value += 1
-			player.PlacedTowers:FindFirstChild("TotalTowers").Value += 1
+input.VehicleToggleLights(function()
+	if car then
+		local remote = car:FindFirstChild("LampRemote", true)
+		if remote then
+			game.ReplicatedStorage.Interaction.RemoteProxy:FireServer(remote)
 		end
-		
-		local ownerValue = Instance.new("StringValue")
-		ownerValue.Name = "Owner"
-		ownerValue.Value = player.Name
-		ownerValue.Parent = newTower.Config
-		
-		local targetMode = Instance.new("StringValue")
-		targetMode.Name = "TargetMode"
-		if oldMode then
-			targetMode.Value = oldMode
-		else
-			targetMode.Value = "First"
-		end
-		targetMode.Value = oldMode or "First"
-		targetMode.Parent = newTower.Config
-		
-		newTower.HumanoidRootPart.CFrame = cframe
-		newTower.Parent = workspace.Towers
-		
-		local height = (newTower.PrimaryPart.Size.Y / 2) + newTower["Left Leg"].Size.Y
-		local offset = Vector3.new(0, -height, 0)
-		
-		local p = Instance.new("Part")
-		p.Name = "Boundary"
-		p.Shape = Enum.PartType.Cylinder
-		p.Transparency = 1
-		p.BrickColor = BrickColor.new("Persimmon")
-		p.Size = Vector3.new(0.2, newTower.Config.BoundarySize.value, newTower.Config.BoundarySize.Value)
-		p.Orientation = Vector3.new(0, -90, 90)
-		p.Material = Enum.Material.Neon
-		p.TopSurface = Enum.SurfaceType.Smooth
-		p.BottomSurface = Enum.SurfaceType.Smooth
-		p.Position = newTower.PrimaryPart.Position + offset
-		p.CanCollide = false
-		p.CanQuery = true
-		p.Parent = newTower
-		p.Anchored = true
-		player.leaderstats.Gold.Value -= newTower.Config.Price.Value
-		
-		
-		if string.find(newTower.Name, "Farm", 1, false) then
-			coroutine.wrap(tower.farm)(newTower, player)
-		else
-			coroutine.wrap(tower.Attack)(newTower, player)
-		end
-		
-		return newTower 
-	else
-		warn("не обращай внемание:", name)
-		return false
 	end
-end
-spawnTowerFunction.OnServerInvoke = tower.spawn
-
-
-function tower.CheckSpawn(player, name, Lvl, previous, check)
-	local towerExists = replicatedStorage.Towers:FindFirstChild(name, true)
-	if check == true then
-		towerExists = replicatedStorage.Towers["Upgrades_" .. Lvl + 1]:FindFirstChild(name, true)
-	end
-
-	if towerExists then
-		local maxTowers = towerExists.Config.MaxTowers.Value
-		
-		if towerExists.Config.Price.Value <= player.leaderstats.Gold.Value then
-			if previous or player.PlacedTowers[name .. "s"].Value < maxTowers then
-				if player.PlacedTowers:FindFirstChild("TotalTowers").Value <= 25 then
-					return true
-				elseif check == true then
-					return true
-				else
-					warn("Player has reached max limit")
-				end
-			else
-				warn("Player has reached max limit")
-			end
-		else
-			warn("Player cannot afford")
-		end
-	else
-		warn("this tower does not exist")
-	end
-
-	return false
-end
-requestTowerFunction.OnServerInvoke = tower.CheckSpawn
-
-return tower
+end)
