@@ -12,11 +12,15 @@ function newCharacter()
 	
 	humanoid.StateChanged:connect(function(old, new)
 		if car and not (new == Enum.HumanoidStateType.Seated) then
+			print("1")
+				
 			steerWheels(0)
 			powerWheels(0)
 			stopSounds()
 			car = nil
 		elseif not car and new == Enum.HumanoidStateType.Seated and humanoid.SeatPart and humanoid.SeatPart.Name == "DriveSeat" then
+			print("2")
+			
 			car = humanoid.SeatPart.Parent
 			runSounds()
 		end
@@ -87,6 +91,8 @@ function throttleChanged()
 	
 	local startThrottle = 0.3 * diffSign
 	if math.abs(throttle) < 0.05 then
+		print("mat")
+			
 		startThrottle = 0
 		throttle = 0
 	elseif math.abs(throttle) < 0.4 then
@@ -112,6 +118,8 @@ function runSounds()
 		wait(1)
 		local currentPitch = car and (1 - car.Configuration.SoundPitchRange.MinValue) / (car.Configuration.SoundPitchRange.MaxValue - car.Configuration.SoundPitchRange.MinValue)
 		while car do
+			print("car2")
+			
 			currentPitch = currentPitch + (math.abs(currentPowerOutput) - currentPitch) * 0.1
 			car.RunSounds:FireServer("Set Pitch", currentPitch)
 			wait()
@@ -121,6 +129,8 @@ end
 
 function stopSounds()
 	if car:FindFirstChild("RunSounds") then
+		print("tr")
+			
 		car.RunSounds:FireServer("Cut")
 	end
 end
@@ -164,6 +174,8 @@ function setVehicleOwnership(seat, partList, networkOwnershipRequestList)
 					if v.Name == "HitchConnectionInstance" then
 						if v.Value and v.Value.Parent then
 							--game.ReplicatedStorage.Interaction.ClientRequestOwnership:FireServer(v.Value)
+							print("val")
+			
 							table.insert(networkOwnershipRequestList, v.Value)
 						else
 							v:Destroy()
@@ -180,6 +192,8 @@ function setVehicleOwnership(seat, partList, networkOwnershipRequestList)
 					local centerPos = (seat.Parent.Main.CFrame * bed.CFrame.Value).p				
 					local size = bed.Size.Value.magnitude * Vector3.new(1, 1, 1) * 0.6
 					local regionCount = 2
+					print("start")
+			
 					
 					for x = 0, regionCount - 1 do
 						for y = 0, regionCount - 1 do
@@ -240,6 +254,8 @@ end
 
 function findHighestParent(child)
 	if not child or not child.Parent then
+		print("fail ret")
+		
 		return nil
 	end
 	if child.Parent:FindFirstChild("Owner") then
@@ -259,6 +275,8 @@ local input = require(script.Parent.UserInput)
 
 input.SteerChange(function(v)
 	if car then
+		print("car")
+			
 		steer = v
 		steerChanged()
 	end
@@ -275,6 +293,8 @@ input.VehicleToggleLights(function()
 	if car then
 		local remote = car:FindFirstChild("LampRemote", true)
 		if remote then
+			print("rem")
+				
 			game.ReplicatedStorage.Interaction.RemoteProxy:FireServer(remote)
 		end
 	end
